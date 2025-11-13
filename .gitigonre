@@ -1,0 +1,38 @@
+Ignoră mediul virtual Python
+
+.venv/
+venv/
+*.venv/
+
+Ignoră fișierele cache Python
+
+pycache/
+*.pyc
+
+Ignoră fișierele de configurare ale IDE-urilor
+
+.vscode/
+.idea/
+
+Ignoră folderele de output ale Ultralytics
+
+runs/
+
+Ignoră fișierele model (.pt) - sunt prea mari pentru Git
+
+*.pt  <-- Această linie bloca totul
+
+BLOCĂM toate fișierele .pt
+
+*.pt
+
+DAR FACEM O EXCEPȚIE PENTRU modelul nostru antrenat,
+
+care se află în folderul 'weights'.
+
+!weights/best.pt
+
+Ignoră fișierele de sistem (macOS, Windows)
+
+.DS_Store
+Thumbs.db
