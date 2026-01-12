@@ -20,7 +20,7 @@ def detectie_imagine(path):
         print(f"Eroare: Imaginea '{args.image_path}' nu a fost găsită!")
         return
 
-    model_path = 'weights/best1.pt'
+    model_path = 'weights/best.pt'
     # model_path = 'yolo11n.pt' # Uncomment daca nu ai weights custom
     
     if not os.path.exists(model_path):
