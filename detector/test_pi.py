@@ -2,102 +2,152 @@ import time
 import sys
 import cv2
 import numpy as np
-# Fortam printarea imediata in terminal (flush=True)
-print(">>> [1/6] Importurile au reusit.", flush=True)
-
 from ultralytics import YOLO
 from picamera2 import Picamera2
 
-# --- CONFIGURARE ---
-print(">>> [2/6] Initializare Picamera2...", flush=True)
+# --- CONFIGURARE UTILIZATOR ---
+CONFIDENCE_THRESHOLD = 0.5  # Ignoră ce e sub 50% sigur
+CONSECUTIVE_FRAMES_TRIGGER = 5 # Câte cadre la rând trebuie să vadă același obiect ca să sorteze
+COOLDOWN_SECONDS = 3.0 # Pauză după o sortare (să aibă timp motorul să revină)
+
+# Mapează numele claselor din YOLO la ID-ul coșului tău
+# (Verifică numele exact din modelul tău best.pt!)
+CATEGORY_MAP = {
+    "plastic": 1,
+    "metal": 2,
+    "cardboard": 3,
+    "waste": 0
+}
+DEFAULT_BIN = 0 # Unde merge gunoiul nerecunoscut
+
+# Lista claselor pentru afișare (doar vizual)
+DISPLAY_CLASSES = ["Cardboard", "Metal", "Plastic", "Waste"]
+
+# --- INITIALIZARE HARDWARE ---
+print(">>> [INIT] Pornire Camera (BGR Format)...", flush=True)
 try:
     picam2 = Picamera2()
-    # Configurare explicita pentru performanta si compatibilitate
+    # TRUCUL PENTRU CULORI: Cerem direct BGR888
     config = picam2.create_video_configuration(
-        main={"size": (640, 480), "format": "RGB888"}
+        main={"size": (640, 480), "format": "BGR888"}
     )
     picam2.configure(config)
     picam2.start()
-    print(">>> [SUCCESS] Camera a pornit cu succes!", flush=True)
 except Exception as e:
-    print(f"!!! [EROARE] Nu pot porni camera: {e}", flush=True)
+    print(f"!!! Eroare Camera: {e}")
     sys.exit()
 
-# --- INCARCARE MODEL ---
-print(">>> [3/6] Incarcare model YOLO (asteapta putin)...", flush=True)
+print(">>> [INIT] Incarcare Model...", flush=True)
 try:
-    # Incearca best.pt, daca nu, fallback pe yolov8n.pt
-    try:
-        model = YOLO("../weights/best.pt") # Ajusteaza calea daca e nevoie
-        print(">>> [INFO] Am incarcat 'best.pt'", flush=True)
-    except:
-        print("!!! [ATENTIE] Nu gasesc best.pt, descarc yolov8n.pt standard...", flush=True)
-        model = YOLO("yolov8n.pt")
-    
-    print(">>> [SUCCESS] Model incarcat!", flush=True)
+    model = YOLO("../weights/best.pt") # Asigură-te de cale!
+    # model = YOLO("yolov8n.pt") # Fallback pt teste
 except Exception as e:
-    print(f"!!! [EROARE] Problema la model: {e}", flush=True)
+    print(f"!!! Eroare Model: {e}")
     sys.exit()
 
-class_names = ["Cardboard", "Metal", "Plastic", "Waste"]
+# --- ZONA DE CONTROL SERVO ---
+def trigger_servo_action(category_name):
+    """
+    AICI LIPESTI CODUL TAU PENTRU MOTOARE.
+    Aceasta functie este apelata o singura data cand s-a luat decizia.
+    """
+    bin_id = CATEGORY_MAP.get(category_name.lower(), DEFAULT_BIN)
+    
+    print(f"\n✅ ACTIUNE DECLANSATA: Sortare [{category_name}] -> BIN {bin_id}")
+    
+    # --- EXEMPLU LOGICA SERVO (Pseudocod) ---
+    # move_carousel(bin_id)
+    # open_flap()
+    # time.sleep(1)
+    # close_flap()
+    # return_home()
+    # ----------------------------------------
+    
+    return True # Returneaza True cand a terminat miscarea
 
-print(">>> [4/6] Incep bucla de detectie. Fereastra ar trebui sa apara acum.", flush=True)
-print(">>> Apasa 'q' in fereastra video pentru a iesi.", flush=True)
+# --- LOOP PRINCIPAL ---
+print(">>> [READY] Sistem pregatit. Astept gunoi...", flush=True)
 
-frame_count = 0
+consecutive_count = 0
+last_seen_class = None
+is_sorting = False
+last_sort_time = 0
 
 try:
     while True:
-        # 1. CAPTURA
-        # Captureaza imaginea ca array numpy
-        image = picam2.capture_array()
-        
-        # Picamera2 da RGB, OpenCV vrea BGR
-        frame = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        # 0. Verificam cooldown (daca tocmai a sortat, stam putin)
+        if time.time() - last_sort_time < COOLDOWN_SECONDS:
+            # Continuam sa citim camera ca sa nu se blocheze bufferul, dar nu procesam AI
+            picam2.capture_array() 
+            continue
 
-        # 2. DETECTIE
+        # 1. Captura (Direct BGR acum!)
+        frame = picam2.capture_array()
+
+        # 2. Inferenta AI
         results = model(frame, stream=True, verbose=False)
 
-        # 3. DESENARE
-        detected_something = False
+        # 3. Gasirea celui mai bun obiect din cadru
+        best_class = None
+        max_conf = 0.0
+        current_box = None # Pentru desenare
+
         for r in results:
             for box in r.boxes:
-                detected_something = True
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
                 conf = float(box.conf[0])
-                cls_id = int(box.cls[0])
+                if conf > CONFIDENCE_THRESHOLD and conf > max_conf:
+                    max_conf = conf
+                    cls_id = int(box.cls[0])
+                    # Extragem numele clasei din dictionarul modelului sau lista noastra
+                    if hasattr(model, 'names'):
+                        best_class = model.names[cls_id]
+                    elif cls_id < len(DISPLAY_CLASSES):
+                        best_class = DISPLAY_CLASSES[cls_id]
+                    current_box = box
 
-                # Culoare verde
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        # 4. Logica de Stabilizare (Debounce)
+        if best_class:
+            # Desenam obiectul detectat
+            x1, y1, x2, y2 = map(int, current_box.xyxy[0])
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f"{best_class} {max_conf:.2f}", (x1, y1 - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            # Verificam stabilitatea
+            if best_class == last_seen_class:
+                consecutive_count += 1
+            else:
+                consecutive_count = 1 # Reset daca s-a schimbat obiectul
+                last_seen_class = best_class
+
+            # 5. DECLANSARE ACTIUNE
+            if consecutive_count >= CONSECUTIVE_FRAMES_TRIGGER:
+                print(f"> Confirmare stabila: {best_class}")
                 
-                label = f"Obj {cls_id}"
-                if cls_id < len(class_names):
-                    label = class_names[cls_id]
+                # Apelam functia de servo
+                trigger_servo_action(best_class)
                 
-                cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                # Resetam totul si intram in cooldown
+                consecutive_count = 0
+                last_seen_class = None
+                last_sort_time = time.time()
+                print(">>> Pauza racire (Cooldown)...")
 
-        # DEBUG IN TERMINAL: Arata ca suntem vii
-        frame_count += 1
-        if frame_count % 30 == 0: # Printeaza o data la 30 de cadre
-            status = "DETECTAT" if detected_something else "Nimic"
-            print(f"> Running... Frame {frame_count} [{status}]", flush=True)
+        else:
+            # Nu se vede nimic relevant
+            consecutive_count = 0
+            last_seen_class = None
 
-        # 4. AFISARE
-        # Aici e testul critic pentru fereastra
-        cv2.imshow("Smart Bin Pi5 - TEST", frame)
+        # 6. Afisare
+        cv2.imshow("Smart Bin Control", frame)
 
-        # Asteapta 1ms pentru tasta si pentru a procesa fereastra GUI
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            print(">>> [INFO] Utilizatorul a apasat Q. Iesire.", flush=True)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-except Exception as e:
-    print(f"\n!!! [CRASH] Eroare in bucla while: {e}", flush=True)
+except KeyboardInterrupt:
+    print("Oprire manuala.")
 
 finally:
-    print(">>> [5/6] Oprire camera...", flush=True)
     picam2.stop()
     cv2.destroyAllWindows()
-    print(">>> [6/6] Program terminat.", flush=True)
+    print("Sistem oprit.")
