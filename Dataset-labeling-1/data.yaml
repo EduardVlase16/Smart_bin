@@ -1,0 +1,15 @@
+names:
+- Cardboard
+- Metal
+- Plastic
+- Waste
+nc: 4
+roboflow:
+  license: Private
+  project: dataset-labeling-nmkkk
+  url: https://app.roboflow.com/datasetforpython/dataset-labeling-nmkkk/1
+  version: 1
+  workspace: datasetforpython
+test: ../test/images
+train: ../train/images
+val: ../valid/images

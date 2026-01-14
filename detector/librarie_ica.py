@@ -311,3 +311,35 @@ def apply_fuzzy_smoothing(colour_ch, config):
             fuzzy_img[r][c] = int(new_val)
             
     return fuzzy_img
+
+def apply_median_filter(channel_data):
+    """
+    Aplica filtru median standard 3x3.
+    """
+    rows = len(channel_data)
+    cols = len(channel_data[0])
+    
+    # Cream matricea rezultat (copie goala)
+    filtered_img = [[0 for _ in range(cols)] for _ in range(rows)]
+    
+    print("Se aplica filtrul Median (competitor)...")
+    
+    # Evitam marginile (similar cu Fuzzy)
+    for r in range(1, rows - 1):
+        for c in range(1, cols - 1):
+            
+            # 1. Colectam vecinii 3x3
+            neighbors = []
+            for i in range(-1, 2):
+                for j in range(-1, 2):
+                    neighbors.append(channel_data[r+i][c+j])
+            
+            # 2. Sortam lista
+            neighbors.sort()
+            
+            # 3. Alegem elementul din mijloc (indexul 4 din 0..8)
+            median_val = neighbors[4]
+            
+            filtered_img[r][c] = median_val
+            
+    return filtered_img
